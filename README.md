@@ -1,6 +1,16 @@
 # SQL Testovací Prostředí — E-shop
 
+![Tests](https://github.com/Srotrekl/SQL-eshop-testing/actions/workflows/tests.yml/badge.svg)
+
 Praktické procvičení SQL dotazů pomocí pytest testů proti reálné PostgreSQL databázi.
+
+## Stack
+
+- **PostgreSQL** — databázový server
+- **pytest** — automatické testy
+- **psycopg2** — Python konektor pro PostgreSQL
+- **GitHub Actions** — CI/CD pipeline (testy se spustí při každém push)
+- **DBeaver** — GUI nástroj pro průzkum a ladění dat
 
 ## Prerekvizity
 
@@ -15,27 +25,10 @@ Praktické procvičení SQL dotazů pomocí pytest testů proti reálné Postgre
 createdb -U postgres eshop_test
 ```
 
-Nebo v psql:
+### 2. Zkopíruj `.env.example` jako `.env` a nastav heslo
 
-```sql
-CREATE DATABASE eshop_test;
-```
-
-### 2. Nastav heslo (pokud se liší od "postgres")
-
-Windows CMD:
-```cmd
-set PGPASSWORD=tvojeheslo
-```
-
-PowerShell:
-```powershell
-$env:PGPASSWORD="tvojeheslo"
-```
-
-Linux/Mac:
 ```bash
-export PGPASSWORD=tvojeheslo
+cp .env.example .env
 ```
 
 ### 3. Nainstaluj závislosti
@@ -61,9 +54,11 @@ pytest test_db.py -v
 | Soubor | Popis |
 |--------|-------|
 | `init_db.sql` | Schéma tabulek + testovací data (10 uživatelů, 15 rezervací) |
-| `conftest.py` | Pytest fixtures — připojení k DB, automatický ROLLBACK po každém testu |
-| `test_db.py` | 5 testovacích scénářů |
+| `conftest.py` | Pytest fixtures — připojení k DB přes `.env`, automatický ROLLBACK po každém testu |
+| `test_db.py` | 10 testovacích scénářů |
 | `requirements.txt` | Python závislosti |
+| `.env.example` | Šablona konfigurace DB připojení |
+| `.github/workflows/tests.yml` | CI/CD pipeline — automatické spuštění testů na GitHubu |
 
 ## Testovací scénáře
 
@@ -74,6 +69,11 @@ pytest test_db.py -v
 | 3 | Filtrování podle ceny | `CASE`, `GROUP BY`, `COUNT`, `MIN`, `MAX`, `BETWEEN` |
 | 4 | Zrušení rezervace | `UPDATE`, `WHERE`, `RETURNING`, `LIMIT` |
 | 5 | Chybějící telefon | `IS NULL`, `IS NOT NULL`, `COALESCE`, `COUNT(*)` vs `COUNT(column)` |
+| 6 | Zákazníci s vysokými výdaji | `SUM`, `GROUP BY`, `HAVING`, `JOIN` |
+| 7 | Nejdražší zákazník | subquery, `ORDER BY`, `LIMIT`, `MAX` |
+| 8 | Porušení UNIQUE constraintu | integritní omezení, zpracování výjimek v pytest |
+| 9 | Přehled rezervací podle statusu | `GROUP BY`, `COUNT`, `ORDER BY` na aliasu |
+| 10 | Admini a jejich rezervace | `LEFT JOIN`, `WHERE role`, `COUNT`, `GROUP BY` |
 
 ## Jak to funguje
 
@@ -81,3 +81,4 @@ pytest test_db.py -v
 - Každý test dostane vlastní DB spojení v transakci
 - Po skončení testu se provede `ROLLBACK` — seed data zůstanou nedotčená
 - Testy se navzájem neovlivňují
+- Při každém `git push` GitHub Actions automaticky spustí celou testovací sadu
