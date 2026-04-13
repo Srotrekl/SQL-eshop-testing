@@ -1,9 +1,12 @@
 """
-E-shop SQL testy — 5 scénářů pro praktické procvičení SQL.
+E-shop SQL testy — 10 scénářů pro praktické procvičení SQL.
 
 Každý test běží ve vlastní transakci, která se po testu rollbackne.
 Seed data tak zůstávají vždy v původním stavu.
 """
+
+import psycopg2
+import pytest
 
 
 # ──────────────────────────────────────────────
@@ -208,3 +211,144 @@ def test_null_phone_handling(db):
         assert total == 10, "COUNT(*) musí vrátit všech 10 uživatelů"
         assert count_phone == 8, "COUNT(phone) musí vrátit jen 8 (ignoruje NULL)"
         assert count_phone == total - 2, "Rozdíl mezi COUNT(*) a COUNT(phone) = počet NULL"
+
+
+# ──────────────────────────────────────────────
+# SCÉNÁŘ 6: Zákazníci s vysokými výdaji
+# SQL koncepty: SUM, GROUP BY, HAVING, JOIN
+# ──────────────────────────────────────────────
+def test_high_value_customers(db):
+    with db.cursor() as cur:
+        cur.execute(
+            """
+            SELECT u.email, SUM(b.price) AS total_spent
+            FROM users u
+            JOIN bookings b ON u.id = b.user_id
+            GROUP BY u.id, u.email
+            HAVING SUM(b.price) > 500
+            ORDER BY total_spent DESC
+            """
+        )
+        rows = cur.fetchall()
+        emails = [row[0] for row in rows]
+        totals = [float(row[1]) for row in rows]
+
+        # eve: 300+600+180=1080, carol: 850+200=1050
+        assert len(rows) == 2, f"Očekáváni 2 zákazníci s výdaji nad 500, nalezeno {len(rows)}"
+        assert "eve@example.com" in emails
+        assert "carol@example.com" in emails
+        assert totals[0] > totals[1], "Výsledky musí být seřazeny sestupně"
+        assert totals[0] == 1080.0, f"Nejvyšší útrata musí být 1080, je {totals[0]}"
+
+
+# ──────────────────────────────────────────────
+# SCÉNÁŘ 7: Nejdražší zákazník (subquery)
+# SQL koncepty: subquery, SUM, GROUP BY, ORDER BY, LIMIT
+# ──────────────────────────────────────────────
+def test_top_spender(db):
+    with db.cursor() as cur:
+        cur.execute(
+            """
+            SELECT u.email, SUM(b.price) AS total_spent
+            FROM users u
+            JOIN bookings b ON u.id = b.user_id
+            GROUP BY u.id, u.email
+            ORDER BY total_spent DESC
+            LIMIT 1
+            """
+        )
+        row = cur.fetchone()
+        email, total_spent = row[0], float(row[1])
+
+        assert email == "eve@example.com", f"Nejdražší zákazník musí být eve, je {email}"
+        assert total_spent == 1080.0, f"Celková útrata musí být 1080, je {total_spent}"
+
+        # Ověř pomocí subquery — jiný způsob stejného výsledku
+        cur.execute(
+            """
+            SELECT u.email
+            FROM users u
+            JOIN bookings b ON u.id = b.user_id
+            GROUP BY u.id, u.email
+            HAVING SUM(b.price) = (
+                SELECT MAX(user_total)
+                FROM (
+                    SELECT SUM(price) AS user_total
+                    FROM bookings
+                    GROUP BY user_id
+                ) AS totals
+            )
+            """
+        )
+        subquery_row = cur.fetchone()
+        assert subquery_row[0] == email, "Subquery musí vrátit stejného zákazníka"
+
+
+# ──────────────────────────────────────────────
+# SCÉNÁŘ 8: Porušení UNIQUE constraintu
+# SQL koncepty: databázové integritní omezení, zpracování výjimek
+# ──────────────────────────────────────────────
+def test_duplicate_email_raises_error(db):
+    with db.cursor() as cur:
+        # Vloží unikátní email — musí projít
+        cur.execute(
+            "INSERT INTO users (email, role) VALUES (%s, %s)",
+            ("unique@example.com", "customer"),
+        )
+
+    # Pokus o druhý INSERT se stejným emailem musí vyhodit výjimku
+    with db.cursor() as cur:
+        with pytest.raises(psycopg2.errors.UniqueViolation):
+            cur.execute(
+                "INSERT INTO users (email, role) VALUES (%s, %s)",
+                ("unique@example.com", "customer"),
+            )
+
+
+# ──────────────────────────────────────────────
+# SCÉNÁŘ 9: Přehled rezervací podle statusu
+# SQL koncepty: GROUP BY, COUNT, ORDER BY na aliasu
+# ──────────────────────────────────────────────
+def test_booking_status_summary(db):
+    with db.cursor() as cur:
+        cur.execute(
+            """
+            SELECT status, COUNT(*) AS cnt
+            FROM bookings
+            GROUP BY status
+            ORDER BY cnt DESC
+            """
+        )
+        rows = cur.fetchall()
+        summary = {row[0]: row[1] for row in rows}
+
+        assert summary.get("confirmed") == 7, f"Confirmed: očekáváno 7, je {summary.get('confirmed')}"
+        assert summary.get("pending") == 5, f"Pending: očekáváno 5, je {summary.get('pending')}"
+        assert summary.get("cancelled") == 3, f"Cancelled: očekáváno 3, je {summary.get('cancelled')}"
+        assert sum(summary.values()) == 15, "Celkový počet musí být 15"
+
+
+# ──────────────────────────────────────────────
+# SCÉNÁŘ 10: Admini a jejich rezervace
+# SQL koncepty: JOIN, WHERE s filtrací role, COUNT, GROUP BY
+# ──────────────────────────────────────────────
+def test_admin_users_booking_count(db):
+    with db.cursor() as cur:
+        cur.execute(
+            """
+            SELECT u.email, COUNT(b.id) AS booking_count
+            FROM users u
+            LEFT JOIN bookings b ON u.id = b.user_id
+            WHERE u.role = 'admin'
+            GROUP BY u.id, u.email
+            ORDER BY u.email
+            """
+        )
+        rows = cur.fetchall()
+        admins = {row[0]: row[1] for row in rows}
+
+        assert len(admins) == 2, f"Očekáváni 2 admini, nalezeno {len(admins)}"
+        assert "dave@example.com" in admins
+        assert "heidi@example.com" in admins
+        assert admins["dave@example.com"] == 1, "Dave má 1 rezervaci (Spa Package)"
+        assert admins["heidi@example.com"] == 2, "Heidi má 2 rezervace (Golf Round, Tennis Lesson)"
