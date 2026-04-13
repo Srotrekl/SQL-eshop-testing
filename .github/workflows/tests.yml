@@ -44,4 +44,4 @@ jobs:
           DB_NAME: eshop_test
           DB_USER: postgres
           DB_PASSWORD: postgres
-        run: pytest test_db.py -v
+        run: pytest test_db.py -v --cov=. --cov-report=term-missing
